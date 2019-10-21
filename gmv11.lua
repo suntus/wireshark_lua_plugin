@@ -9,6 +9,7 @@ do
         [23] = 'ApplicationData',
         [80] = 'Site2site',
     }
+    p_gm.fields.record = ProtoField.bytes("tls.record.xdja", "Record Layer", base.NONE)
     p_gm.fields.r_type = ProtoField.uint8('tls.record.xdja.type', 'Content Type', base.DEC, r_content_type)
     p_gm.fields.r_version = ProtoField.uint16('tls.record.xdja.version', 'Version', base.HEX, {[0x0101] = 'GM v1.1'})
     p_gm.fields.r_len = ProtoField.uint16("tls.record.xdja.length", "Length", base.DEC)
@@ -89,9 +90,31 @@ do
     p_gm.fields.hs_certificate_len = ProtoField.uint24('tls.handshake.xdja.certificate_len', 'Certificate Length', base.DEC)
     p_gm.fields.hs_certificate = ProtoField.bytes('tls.handshake.xdja.certificate', 'Certificate', base.NONE)
 
+    p_gm.fields.hs_ske_sign = ProtoField.bytes('tls.handshake.xdja.ske_signature', 'ServerKeyExchange Signature', base.NONE)
 
+    p_gm.fields.hs_cert_types_len = ProtoField.uint8('tls.handshake.xdja.cert_types_len', 'Certificate Types Length', base.DEC)
+    p_gm.fields.hs_cert_types = ProtoField.bytes('tls.handshake.xdja.cert_types', 'Certificate Types', base.NONE)
+
+    local cert_types = {
+        [1] = "rsa_sign",
+        [2] = "dss_sign",
+        [3] = "rsa_fixed_dh",
+        [4] = "dss_fixed_dh",
+        [5] = "rsa_ephemeral_dh_RESERVED",
+        [6] = "dss_ephemeral_dh_RESERVED",
+        [20] = "fortezza_dms_RESERVED",
+        [50] = "sm2_legacy",
+        [80] = "sm2",
+    }
+    p_gm.fields.hs_cert_type = ProtoField.uint8('tls.handshake.xdja.cert_type', 'Certificate Type', base.DEC, cert_types)
+    p_gm.fields.hs_DNs_len = ProtoField.uint16('tls.handshake.xdja.distinguished_names_len', 'Distinguished Names Length', base.DEC)
+    p_gm.fields.hs_DNs = ProtoField.bytes('tls.handshake.xdja.distinguished_names', 'Distinguished Names', base.NONE)
+    p_gm.fields.hs_DN_len = ProtoField.uint16('tls.handshake.xdja.distinguished_name_len', 'Distinguished Name Length', base.DEC)
+    p_gm.fields.hs_DN = ProtoField.string('tls.handshake.xdja.distinguished_name', 'Distinguished Name', base.NONE)
+
+    p_gm.fields.hs_cv_sign_len = ProtoField.uint16('tls.handshake.xdja.cv_signature', 'CertificateVerify Signature', base.DEC)
+    p_gm.fields.hs_cv_sign = ProtoField.bytes('tls.handshake.xdja.cv_signature', 'CertificateVerify Signature', base.NONE)
     local function hs_handler_hr(tvb, pinfo, tree)
-
     end
     local function hs_handler_ch(tvb, pinfo, tree)
         pinfo.cols.info = "ClientHello"
@@ -218,14 +241,72 @@ do
         pinfo.cols.info = "ServerKeyExchange"
         local offset = 0
 
-        
+        local v_sign = tvb(offset, -1)
+        tree:add(p_gm.fields.hs_ske_sign, v_sign)
+
     end
+
     local function hs_handler_cr(tvb, pinfo, tree)
+        pinfo.cols.info = "Certificate Request"
+        local offset = 0
+
+        local v_cert_types_len = tvb(offset, 1)
+        offset = offset + 1
+        tree:add(p_gm.fields.hs_cert_types_len, v_cert_types_len)
+
+        local cert_types_len = v_cert_types_len:uint() or 0
+        if cert_types_len ~= 0 then
+            local v_cert_types = tvb(offset, cert_types_len)
+            local sub_cert_types = tree:add(p_gm.fields.hs_cert_types, v_cert_types)
+
+            for i = 1, cert_types_len do
+                local v_cert_type = tvb(offset, 1)
+                offset  = offset + 1
+                sub_cert_types:add(p_gm.fields.hs_cert_type, v_cert_type)
+            end
+        end
+
+        local v_DNs_len = tvb(offset, 2)
+        offset = offset + 2
+        tree:add(p_gm.fields.hs_DNs_len, v_DNs_len)
+        local DNs_len = v_DNs_len:uint() or 0
+        if DNs_len ~= 0 then
+            local v_DNs = tvb(offset, DNs_len)
+            local sub_DNs = tree:add(p_gm.fields.hs_DNs, v_DNs)
+
+            local i = 1
+            while (i < DNs_len) do
+                local v_DN_len = tvb(offset, 2)
+                offset = offset + 2
+                sub_DNs:add(p_gm.fields.hs_DN_len, v_DN_len)
+
+                local v_DN = tvb(offset, v_DN_len:uint())
+                offset = offset + v_DN_len:uint()
+                sub_DNs:add(p_gm.fields.hs_DN, v_DN)
+
+                i = i + 2 + v_DN_len:uint()
+            end
+        end
     end
+
     local function hs_handler_shd(tvb, pinfo, tree)
+        pinfo.cols.info = "ServerHelloDone"
     end
+
     local function hs_handler_cv(tvb, pinfo, tree)
+        pinfo.cols.info = "Certificate Verify"
+        local offset = 0
+
+        local v_cv_sign_len = tvb(offset, 2)
+        offset = offset + 2
+        tree:add(p_gm.fields.hs_cv_sign_len, v_cv_sign_len)
+
+        local sign_len = v_cv_sign_len:uint()
+        local v_cv_sign  = tvb(offset, sign_len)
+        -- offset = offset + sign_len
+        tree:add(p_gm.fields.hs_cv_sign, v_cv_sign)
     end
+
     local function hs_handler_cke(tvb, pinfo, tree)
     end
     local function hs_handler_fini(tvb, pinfo, tree)
@@ -248,7 +329,10 @@ do
     -- record content type
     function r_handler_ccs(tvb, pinfo, tree)
         -- statements
-        -- TODO:
+        local offset = 0
+
+        tree:append_text("ChangeCipherSpec")
+        pinfo.cols.info ="ChangeCipherSpec"
         return true
     end
     function r_handler_alert(tvb, pinfo, tree)
@@ -258,11 +342,14 @@ do
     end
     function r_handler_hs(tvb, pinfo, tree)
         local offset = 0
+
+        tree:append_text("Handshake Protocol: ")
         local t = tree:add(p_gm.fields.hs, tvb(offset, -1))
 
         local v_type = tvb(offset, 1)
         offset = offset + 1
         t:add(p_gm.fields.hs_type, v_type)
+        tree:append_text(hs_type[v_type:uint()])
         t:set_text("Handshake: "..hs_type[v_type:uint()])
 
         local v_len = tvb(offset, 3)
@@ -297,34 +384,56 @@ do
     local data_dis = Dissector.get('tls')
 
     local function gm_dissector(tvb, pinfo, tree)
-        local root = tree:add(p_gm, tvb)
-
+        local start = 0
         local offset = 0
-        local v_r_type = tvb(offset, 1)
-        offset = offset + 1
-        local v_version = tvb(offset, 2)
-        offset = offset + 2
+        local total = tvb:len()
+        local proto_added  = false
+        local root = nil
 
-        if (v_version:bytes():tohex() ~= "0101") then
-            -- 不是GM协议
-            return false
+        while (offset < total) do
+            start = offset
+            local v_r_type = tvb(offset, 1)
+            offset = offset + 1
+            local v_version = tvb(offset, 2)
+            offset = offset + 2
+
+            if (v_version:bytes():tohex() ~= "0101") then
+                -- 不是GM协议
+                return false
+            end
+
+            if proto_added ~= true then
+                root = tree:add(p_gm, tvb)
+                root:set_text("Transport Layer Security")
+                pinfo.cols.protocol = 'GMv1.1'
+                proto_added = true
+            end
+
+            local v_len = tvb(offset, 2)
+            offset = offset + 2
+
+            sub = root:add(p_gm.fields.record, tvb(start, v_len:uint()))
+            sub:set_text("GMv1.1 Record Layer: ")
+            sub:add(p_gm.fields.r_type,  v_r_type)
+            sub:add(p_gm.fields.r_version, v_version)
+
+            sub:add(p_gm.fields.r_len, v_len)
+
+            local r_type_value = v_r_type:uint()
+            local handler = r_content_proto[r_type_value]
+
+            local ret = false
+            if (handler ~= nil) then
+                ret = handler(tvb(offset, v_len:uint()):tvb(), pinfo, sub)
+                offset = offset + v_len:uint()
+            end
+
+            if ret ~= true then
+                return false
+            end
         end
 
-        pinfo.cols.protocol = 'GMv1.1'
-        root:add(p_gm.fields.r_type,  v_r_type)
-        root:add(p_gm.fields.r_version, v_version)
-
-        local v_len = tvb(offset, 2)
-        offset = offset + 2
-        root:add(p_gm.fields.r_len, v_len)
-
-        local r_type_value = v_r_type:le_uint()
-        local handler = r_content_proto[r_type_value]
-        if (handler ~= nil) then
-            return handler(tvb(offset, -1):tvb(), pinfo, root)
-        end
-
-        return false
+        return true
     end
 
     function p_gm.dissector(tvb, pinfo, tree)
