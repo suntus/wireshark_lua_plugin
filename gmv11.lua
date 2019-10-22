@@ -114,6 +114,42 @@ do
 
     p_gm.fields.hs_cv_sign_len = ProtoField.uint16('tls.handshake.xdja.cv_signature', 'CertificateVerify Signature', base.DEC)
     p_gm.fields.hs_cv_sign = ProtoField.bytes('tls.handshake.xdja.cv_signature', 'CertificateVerify Signature', base.NONE)
+
+    p_gm.fields.alert = ProtoField.bytes('tls.handshake.xdja.alert', 'Alert', base.NONE)
+    local alert_levels = {
+        [1] = "warning",
+        [2] = "fatal",
+    }
+    p_gm.fields.alert_level = ProtoField.uint8('tls.handshake.xdja.alert_level', 'Alert Level', base.DEC, alert_levels)
+    local alert_desc = {
+        [0] = "close_notify",
+        [10] = "unexpected_message",
+        [20] = "bad_record_mac",
+        [21] = "decryption_failed_RESERVED",
+        [22] = "record_overflow",
+        [30] = "decompression_failure",
+        [40] = "handshake_failure",
+        [41] = "no_certificate_RESERVED",
+        [42] = "bad_certificate",
+        [43] = "unsupported_certificate",
+        [44] = "certificate_revoked",
+        [45] = "certificate_expired",
+        [46] = "certificate_unknown",
+        [47] = "illegal_parameter",
+        [48] = "unknown_ca",
+        [49] = "access_denied",
+        [50] = "decode_error",
+        [51] = "decrypt_error",
+        [60] = "export_restriction_RESERVED",
+        [70] = "protocol_version",
+        [71] = "insufficient_security",
+        [80] = "internal_error",
+        [90] = "user_canceled",
+        [100] = "no_renegotiation",
+        [110] = "unsupported_extension",
+    }
+    p_gm.fields.alert_desc = ProtoField.uint8('tls.handshake.xdja.alert_desc', 'Alert Description', base.DEC, alert_desc)
+
     local function hs_handler_hr(tvb, pinfo, tree)
     end
     local function hs_handler_ch(tvb, pinfo, tree)
@@ -328,7 +364,6 @@ do
 
     -- record content type
     function r_handler_ccs(tvb, pinfo, tree)
-        -- statements
         local offset = 0
 
         tree:append_text("ChangeCipherSpec")
@@ -336,8 +371,23 @@ do
         return true
     end
     function r_handler_alert(tvb, pinfo, tree)
-        -- statements
-        -- TODO:
+        local offset = 0
+
+        tree:append_text("Alert: ")
+
+        local t = tree:add(p_gm.fields.alert, tvb(offset, -1))
+
+        local v_alert_level = tvb(offset, 1)
+        offset = offset + 1
+        t:add(p_gm.fields.alert_level, v_alert_level)
+
+        local v_alert_desc = tvb(offset, 1)
+        offset = offset + 1
+        t:add(p_gm.fields.alert_desc, v_alert_desc)
+
+        t:set_text("Alert: "..alert_levels[v_alert_level:uint()]..": "..alert_desc[v_alert_desc:uint()])
+        pinfo.cols.info = "Alert: "..alert_levels[v_alert_level:uint()]..": "..alert_desc[v_alert_desc:uint()]
+
         return true
     end
     function r_handler_hs(tvb, pinfo, tree)
